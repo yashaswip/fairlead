@@ -11,6 +11,16 @@ pip install -e ".[dev]"
 pytest
 ```
 
+Live demo (optional): leaky mock LLM on :8092, then the Task 3 proxy on :8081.
+
+```bash
+python -m mcp_lab.mocks.llm --mode leak --port 8092
+python -m mcp_lab.task3.server
+curl -N localhost:8081/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -d '{"messages":[{"role":"user","content":"hi"}],"stream":true}'
+```
+
 ## Task 1: Build a Custom MCP Server with Strict Validation & Transport Handling
 
 `src/mcp_lab/task1/server.py`

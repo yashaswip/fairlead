@@ -1,13 +1,15 @@
 import json
+import sys
+from pathlib import Path
 
 import pytest
-from mcp import MCPError
+from mcp import MCPError, StdioServerParameters
 from mcp.client import Client
 from mcp.types import INVALID_PARAMS
+from pydantic import ValidationError
 
 from mcp_lab.task1.ledger import GetCustomerInput, TriggerRefundInput, apply_refund, get_customer
 from mcp_lab.task1.server import mcp
-from pydantic import ValidationError
 
 
 def test_customer_id_schema():
@@ -57,3 +59,16 @@ async def test_mcp_invalid_customer_id_is_jsonrpc_invalid_params():
         with pytest.raises(MCPError) as err:
             await client.call_tool("get_customer_record", {"customer_id": "CUST-1"})
         assert err.value.code == INVALID_PARAMS
+
+
+@pytest.mark.asyncio
+async def test_stdio_transport_roundtrip():
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "mcp_lab.task1.server"],
+        cwd=str(Path(__file__).resolve().parents[1]),
+    )
+    async with Client(params) as client:
+        result = await client.call_tool("get_customer_record", {"customer_id": "CUST-10428"})
+        payload = json.loads(result.content[0].text)
+        assert payload["customer_id"] == "CUST-10428"

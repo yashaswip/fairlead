@@ -59,6 +59,23 @@ def test_429_fails_over_to_backup(tmp_path: Path):
     assert "slow down" not in res.text
 
 
+def test_timeout_fails_over_to_backup(tmp_path: Path):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "primary":
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "from-backup"}}]})
+
+    with _router(tmp_path, handler, timeout_ms=50) as client:
+        res = client.post(
+            "/v1/chat/completions",
+            headers={"authorization": "Bearer tenant_a"},
+            json={"messages": [{"role": "user", "content": "hi"}], "max_tokens": 8},
+        )
+    assert res.status_code == 200
+    assert res.headers["x-model-route"] == "backup"
+    assert "from-backup" in res.text
+
+
 def test_rate_limit_returns_gateway_error(tmp_path: Path):
     lim = TokenWindow(str(tmp_path / "gw.sqlite"), 5)
     http = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={})))
