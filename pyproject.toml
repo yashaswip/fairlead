@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "mcp-gateway-lab"
 version = "1.0.0"
-description = "Forward Deployed Engineer (FDE) Assessment Tasks — MCP & LLM Gateways"
+description = "Overview of MCP & LLM gateway assessment tasks"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
