@@ -12,11 +12,6 @@ from mcp_lab.task4.errors import classify_upstream, gateway_error, new_request_i
 from mcp_lab.task4.limiter import TokenWindow, estimate_tokens
 
 log = configure_logging("router")
-app = FastAPI()
-LIMITER = TokenWindow(env("SQLITE_PATH", "./data/gateway.sqlite"), env_int("RATE_LIMIT_TOKENS_PER_MIN", 50_000))
-PRIMARY = env("PRIMARY_LLM_URL", "http://127.0.0.1:8093/v1/chat/completions")
-BACKUP = env("BACKUP_LLM_URL", "http://127.0.0.1:8094/v1/chat/completions")
-TIMEOUT_MS = env_int("PRIMARY_TIMEOUT_MS", 3000)
 
 
 @dataclass
@@ -27,48 +22,79 @@ class Attempt:
     timed_out: bool = False
 
 
-@app.post("/v1/chat/completions")
-async def completions(req: Request) -> JSONResponse:
-    request_id = new_request_id()
-    key = _bearer(req.headers.get("authorization"))
-    if not key:
-        return JSONResponse(gateway_error("unauthorized", request_id), status_code=401)
+def create_app(
+    *,
+    limiter: TokenWindow,
+    primary: str,
+    backup: str,
+    timeout_ms: int,
+    http: httpx.AsyncClient | None = None,
+) -> FastAPI:
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.state.primary = primary
+    app.state.backup = backup
+    app.state.timeout_ms = timeout_ms
+    app.state.http = http
 
-    body = await req.json()
-    if not isinstance(body.get("messages"), list):
-        return JSONResponse(gateway_error("bad_request", request_id), status_code=400)
+    @app.post("/v1/chat/completions")
+    async def completions(req: Request) -> JSONResponse:
+        request_id = new_request_id()
+        key = _bearer(req.headers.get("authorization"))
+        if not key:
+            return JSONResponse(gateway_error("unauthorized", request_id), status_code=401)
 
-    decision = LIMITER.consume(key, estimate_tokens(body))
-    if not decision.allowed:
-        retry = max(1, (decision.retry_after_ms + 999) // 1000)
+        body = await req.json()
+        if not isinstance(body.get("messages"), list):
+            return JSONResponse(gateway_error("bad_request", request_id), status_code=400)
+
+        decision = req.app.state.limiter.consume(key, estimate_tokens(body))
+        if not decision.allowed:
+            retry = max(1, (decision.retry_after_ms + 999) // 1000)
+            return JSONResponse(
+                gateway_error("rate_limited", request_id),
+                status_code=429,
+                headers={"retry-after": str(retry)},
+            )
+
+        primary = await _call(req.app, req.app.state.primary, body)
+        if primary.ok:
+            return JSONResponse(
+                primary.payload,
+                headers={"x-model-route": "primary", "x-request-id": request_id},
+            )
+
+        if primary.status == 429 or primary.timed_out:
+            log.info(
+                "failing over request_id=%s reason=%s",
+                request_id,
+                "timeout" if primary.timed_out else "429",
+            )
+            backup = await _call(req.app, req.app.state.backup, body)
+            if backup.ok:
+                return JSONResponse(
+                    backup.payload,
+                    headers={"x-model-route": "backup", "x-request-id": request_id},
+                )
+            code = classify_upstream(backup.status, backup.timed_out)
+            return JSONResponse(gateway_error(code, request_id), status_code=502)
+
         return JSONResponse(
-            gateway_error("rate_limited", request_id),
-            status_code=429,
-            headers={"retry-after": str(retry)},
+            gateway_error(classify_upstream(primary.status, primary.timed_out), request_id),
+            status_code=502,
         )
 
-    primary = await _call(PRIMARY, body, TIMEOUT_MS)
-    if primary.ok:
-        return JSONResponse(primary.payload, headers={"x-model-route": "primary", "x-request-id": request_id})
-
-    if primary.status == 429 or primary.timed_out:
-        log.info("failing over request_id=%s reason=%s", request_id, "timeout" if primary.timed_out else "429")
-        backup = await _call(BACKUP, body, TIMEOUT_MS)
-        if backup.ok:
-            return JSONResponse(backup.payload, headers={"x-model-route": "backup", "x-request-id": request_id})
-        code = classify_upstream(backup.status, backup.timed_out)
-        return JSONResponse(gateway_error(code, request_id), status_code=502)
-
-    return JSONResponse(
-        gateway_error(classify_upstream(primary.status, primary.timed_out), request_id),
-        status_code=502,
-    )
+    return app
 
 
-async def _call(url: str, body: dict, timeout_ms: int) -> Attempt:
+async def _call(app: FastAPI, url: str, body: dict) -> Attempt:
+    timeout = httpx.Timeout(app.state.timeout_ms / 1000)
+    client = app.state.http
+    owns = client is None
+    if owns:
+        client = httpx.AsyncClient(timeout=timeout)
     try:
-        async with httpx.AsyncClient(timeout=timeout_ms / 1000) as client:
-            res = await client.post(url, json=body)
+        res = await client.post(url, json=body, timeout=timeout)
         if res.status_code == 429:
             return Attempt(ok=False, status=429)
         if res.is_error:
@@ -79,6 +105,9 @@ async def _call(url: str, body: dict, timeout_ms: int) -> Attempt:
     except httpx.HTTPError as exc:
         log.info("upstream error: %s", exc)
         return Attempt(ok=False, status=0)
+    finally:
+        if owns:
+            await client.aclose()
 
 
 def _bearer(header: str | None) -> str | None:
@@ -86,6 +115,19 @@ def _bearer(header: str | None) -> str | None:
         return None
     token = header.removeprefix("Bearer ").strip()
     return token or None
+
+
+def build_default_app() -> FastAPI:
+    limiter = TokenWindow(env("SQLITE_PATH", "./data/gateway.sqlite"), env_int("RATE_LIMIT_TOKENS_PER_MIN", 50_000))
+    return create_app(
+        limiter=limiter,
+        primary=env("PRIMARY_LLM_URL", "http://127.0.0.1:8093/v1/chat/completions"),
+        backup=env("BACKUP_LLM_URL", "http://127.0.0.1:8094/v1/chat/completions"),
+        timeout_ms=env_int("PRIMARY_TIMEOUT_MS", 3000),
+    )
+
+
+app = build_default_app()
 
 
 def main() -> None:

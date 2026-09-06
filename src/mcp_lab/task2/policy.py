@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+import jwt
+
 Role = Literal["admin", "viewer"]
 
 UNAUTHORIZED_TOOL = -32001
 INVALID_REQUEST = -32600
 INVALID_PARAMS = -32602
+JWT_ALG = "HS256"
 
 
 def jsonrpc_error(
@@ -33,14 +36,23 @@ def parse_jsonrpc(body: Any) -> dict[str, Any]:
     return body
 
 
-def role_from_bearer(header: str | None, tokens: dict[Role, str]) -> Role | None:
+def mint_token(role: Role, secret: str) -> str:
+    return jwt.encode({"role": role}, secret, algorithm=JWT_ALG)
+
+
+def role_from_bearer(header: str | None, secret: str) -> Role | None:
     if not header or not header.startswith("Bearer "):
         return None
     token = header.removeprefix("Bearer ").strip()
-    if token == tokens["admin"]:
-        return "admin"
-    if token == tokens["viewer"]:
-        return "viewer"
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, secret, algorithms=[JWT_ALG])
+    except jwt.PyJWTError:
+        return None
+    role = payload.get("role")
+    if role in ("admin", "viewer"):
+        return role
     return None
 
 

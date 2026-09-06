@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from time import time
@@ -19,7 +20,10 @@ class TokenWindow:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self._limit = limit
         self._window_ms = window_ms
-        self._db = sqlite3.connect(path, check_same_thread=False)
+        self._lock = threading.Lock()
+        self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute("PRAGMA synchronous=NORMAL")
         self._db.execute(
             """
             CREATE TABLE IF NOT EXISTS token_events (
@@ -30,31 +34,38 @@ class TokenWindow:
             """
         )
         self._db.execute("CREATE INDEX IF NOT EXISTS idx_tenant_ts ON token_events(tenant, ts)")
-        self._db.commit()
 
     def consume(self, tenant: str, tokens: int, now_ms: int | None = None) -> RateDecision:
         now = now_ms if now_ms is not None else int(time() * 1000)
         start = now - self._window_ms
-        with self._db:
-            self._db.execute("DELETE FROM token_events WHERE ts < ?", (start,))
-            used = self._db.execute(
-                "SELECT COALESCE(SUM(tokens), 0) FROM token_events WHERE tenant = ? AND ts >= ?",
-                (tenant, start),
-            ).fetchone()[0]
-            used = int(used)
-            if used + tokens > self._limit:
-                oldest = self._db.execute(
-                    "SELECT MIN(ts) FROM token_events WHERE tenant = ? AND ts >= ?",
-                    (tenant, start),
-                ).fetchone()[0]
-                retry = max(0, int(oldest) + self._window_ms - now) if oldest else self._window_ms
-                return RateDecision(False, used, max(0, self._limit - used), retry)
-            self._db.execute(
-                "INSERT INTO token_events (tenant, tokens, ts) VALUES (?, ?, ?)",
-                (tenant, tokens, now),
-            )
-            nxt = used + tokens
-            return RateDecision(True, nxt, max(0, self._limit - nxt), 0)
+        with self._lock:
+            self._db.execute("BEGIN IMMEDIATE")
+            try:
+                self._db.execute("DELETE FROM token_events WHERE ts < ?", (start,))
+                used = int(
+                    self._db.execute(
+                        "SELECT COALESCE(SUM(tokens), 0) FROM token_events WHERE tenant = ? AND ts >= ?",
+                        (tenant, start),
+                    ).fetchone()[0]
+                )
+                if used + tokens > self._limit:
+                    oldest = self._db.execute(
+                        "SELECT MIN(ts) FROM token_events WHERE tenant = ? AND ts >= ?",
+                        (tenant, start),
+                    ).fetchone()[0]
+                    retry = max(0, int(oldest) + self._window_ms - now) if oldest else self._window_ms
+                    self._db.execute("COMMIT")
+                    return RateDecision(False, used, max(0, self._limit - used), retry)
+                self._db.execute(
+                    "INSERT INTO token_events (tenant, tokens, ts) VALUES (?, ?, ?)",
+                    (tenant, tokens, now),
+                )
+                self._db.execute("COMMIT")
+                nxt = used + tokens
+                return RateDecision(True, nxt, max(0, self._limit - nxt), 0)
+            except Exception:
+                self._db.execute("ROLLBACK")
+                raise
 
     def close(self) -> None:
         self._db.close()

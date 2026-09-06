@@ -1,6 +1,8 @@
 # Overview
 
-MCP servers, MCP gateways, LLM gateways, security guardrails, and system integration. Python 3.11+, official `mcp` SDK, Pydantic, FastAPI, SQLite on disk.
+MCP servers, MCP gateways, LLM gateways, security guardrails, and system integration.
+
+Stack: Python 3.11+, official `mcp` 2.x (`MCPServer` + in-process `Client` tests), Pydantic v2, FastAPI, HS256 JWTs, httpx streaming, SQLite WAL.
 
 ```bash
 python3 -m venv .venv
@@ -41,15 +43,16 @@ python -m mcp_lab.task2.downstream   # :8091
 python -m mcp_lab.task2.proxy        # :8080
 ```
 
-`Authorization: Bearer <token>` maps to admin/viewer (`TOKEN_ADMIN` / `TOKEN_VIEWER`).
+`Authorization: Bearer <jwt>` — HS256 token with `{"role": "admin"|"viewer"}` (`GATEWAY_JWT_SECRET`).
 
 - `tools/list` is forwarded
-- `tools/call` with `params.name` starting `admin_` needs the admin token
+- `tools/call` with `params.name` starting `admin_` needs `role=admin`
 - otherwise `{ "error": { "code": -32001, "message": "Unauthorized Tool Call" } }` and the downstream is not called
 
 ```bash
+python -c "from mcp_lab.task2.policy import mint_token; print(mint_token('viewer', 'dev-only-change-me-use-32bytes-min'))"
 curl -s localhost:8080/mcp \
-  -H 'authorization: Bearer vw_live_replace_me' \
+  -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"admin_reset_key"}}'
 ```
