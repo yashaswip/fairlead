@@ -28,12 +28,19 @@ def test_refund_schema():
     TriggerRefundInput.model_validate(
         {"customer_id": "CUST-10428", "amount": 12.5, "reason": "duplicate charge on invoice"}
     )
+    TriggerRefundInput.model_validate(
+        {"customer_id": "CUST-10428", "amount": 12, "reason": "duplicate charge on invoice"}
+    )
     with pytest.raises(ValidationError):
         TriggerRefundInput.model_validate(
             {"customer_id": "CUST-10428", "amount": 0, "reason": "duplicate charge on invoice"}
         )
     with pytest.raises(ValidationError):
         TriggerRefundInput.model_validate({"customer_id": "CUST-10428", "amount": 1, "reason": "too short"})
+    with pytest.raises(ValidationError):
+        TriggerRefundInput.model_validate(
+            {"customer_id": "CUST-10428", "amount": "12.5", "reason": "duplicate charge on invoice"}
+        )
 
 
 def test_ledger_rejects_over_refund():
@@ -72,3 +79,11 @@ async def test_stdio_transport_roundtrip():
         result = await client.call_tool("get_customer_record", {"customer_id": "CUST-10428"})
         payload = json.loads(result.content[0].text)
         assert payload["customer_id"] == "CUST-10428"
+
+
+def test_task1_never_prints_to_stdout():
+    root = Path(__file__).resolve().parents[1] / "src" / "mcp_lab" / "task1"
+    for path in root.glob("*.py"):
+        text = path.read_text()
+        assert "print(" not in text
+        assert "console.log" not in text

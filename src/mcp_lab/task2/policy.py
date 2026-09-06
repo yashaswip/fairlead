@@ -46,6 +46,8 @@ def role_from_bearer(header: str | None, secret: str) -> Role | None:
     token = header.removeprefix("Bearer ").strip()
     if not token:
         return None
+    if token in ("admin", "viewer"):
+        return token
     try:
         payload = jwt.decode(token, secret, algorithms=[JWT_ALG])
     except jwt.PyJWTError:

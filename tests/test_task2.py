@@ -12,6 +12,8 @@ SECRET = "test-secret-must-be-32-bytes-min"
 def test_jwt_maps_to_role():
     assert role_from_bearer(f"Bearer {mint_token('admin', SECRET)}", SECRET) == "admin"
     assert role_from_bearer(f"Bearer {mint_token('viewer', SECRET)}", SECRET) == "viewer"
+    assert role_from_bearer("Bearer admin", SECRET) == "admin"
+    assert role_from_bearer("Bearer viewer", SECRET) == "viewer"
     assert role_from_bearer("Bearer nope", SECRET) is None
 
 
@@ -56,6 +58,24 @@ def test_viewer_admin_tool_is_blocked_without_downstream():
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "admin_reset_key"}},
         )
     assert res.json()["error"]["code"] == -32001
+    assert seen == []
+
+
+def test_plain_bearer_viewer_is_blocked():
+    seen: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, json={"jsonrpc": "2.0", "id": 1, "result": {}})
+
+    with _client(handler) as client:
+        res = client.post(
+            "/mcp",
+            headers={"authorization": "Bearer viewer"},
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "admin_reset_key"}},
+        )
+    assert res.json()["error"]["code"] == -32001
+    assert res.json()["error"]["message"] == "Unauthorized Tool Call"
     assert seen == []
 
 

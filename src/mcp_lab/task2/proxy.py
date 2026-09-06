@@ -44,6 +44,9 @@ def create_app(
         rpc_id = rpc.get("id")
         method = rpc["method"]
 
+        if method == "tools/list":
+            return await _forward(req, rpc, rpc_id)
+
         if method == "tools/call":
             name = tool_name(rpc.get("params"))
             if not name:
@@ -51,14 +54,23 @@ def create_app(
             if not allowed(role, name):
                 log.info("blocked admin tool role=%s name=%s", role, name)
                 return JSONResponse(unauthorized(rpc_id, name))
+            return await _forward(req, rpc, rpc_id)
 
+        return await _forward(req, rpc, rpc_id)
+
+    async def _forward(req: Request, rpc: dict, rpc_id) -> JSONResponse:
         client = req.app.state.http
         owns = client is None
         if owns:
             client = httpx.AsyncClient(timeout=10.0)
         try:
             res = await client.post(req.app.state.downstream, json=rpc)
-            return JSONResponse(res.json(), status_code=res.status_code)
+            try:
+                payload = res.json()
+            except ValueError:
+                log.info("downstream returned non-json")
+                return JSONResponse(jsonrpc_error(rpc_id, -32002, "downstream MCP unavailable"), status_code=502)
+            return JSONResponse(payload, status_code=res.status_code)
         except httpx.HTTPError as exc:
             log.info("downstream failed: %s", exc)
             return JSONResponse(jsonrpc_error(rpc_id, -32002, "downstream MCP unavailable"), status_code=502)

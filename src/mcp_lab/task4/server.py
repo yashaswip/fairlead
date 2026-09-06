@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 import httpx
@@ -48,7 +49,7 @@ def create_app(
         if not isinstance(body.get("messages"), list):
             return JSONResponse(gateway_error("bad_request", request_id), status_code=400)
 
-        decision = req.app.state.limiter.consume(key, estimate_tokens(body))
+        decision = await asyncio.to_thread(req.app.state.limiter.consume, key, estimate_tokens(body))
         if not decision.allowed:
             retry = max(1, (decision.retry_after_ms + 999) // 1000)
             return JSONResponse(
@@ -88,22 +89,27 @@ def create_app(
 
 
 async def _call(app: FastAPI, url: str, body: dict) -> Attempt:
-    timeout = httpx.Timeout(app.state.timeout_ms / 1000)
+    timeout_s = app.state.timeout_ms / 1000
+    timeout = httpx.Timeout(timeout_s)
     client = app.state.http
     owns = client is None
     if owns:
         client = httpx.AsyncClient(timeout=timeout)
     try:
-        res = await client.post(url, json=body, timeout=timeout)
+        res = await asyncio.wait_for(client.post(url, json=body, timeout=timeout), timeout=timeout_s)
         if res.status_code == 429:
             return Attempt(ok=False, status=429)
         if res.is_error:
             return Attempt(ok=False, status=res.status_code)
-        return Attempt(ok=True, payload=res.json(), status=res.status_code)
-    except httpx.TimeoutException:
+        try:
+            payload = res.json()
+        except ValueError:
+            return Attempt(ok=False, status=res.status_code or 502)
+        return Attempt(ok=True, payload=payload, status=res.status_code)
+    except (asyncio.TimeoutError, httpx.TimeoutException):
         return Attempt(ok=False, timed_out=True)
     except httpx.HTTPError as exc:
-        log.info("upstream error: %s", exc)
+        log.info("upstream error: %s", type(exc).__name__)
         return Attempt(ok=False, status=0)
     finally:
         if owns:

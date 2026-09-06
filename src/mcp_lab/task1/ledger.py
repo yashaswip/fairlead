@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PositiveFloat, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 
 class GetCustomerInput(BaseModel):
@@ -16,8 +16,15 @@ class TriggerRefundInput(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     customer_id: str = Field(pattern=r"^CUST-\d{5}$")
-    amount: PositiveFloat
+    amount: float = Field(gt=0)
     reason: str = Field(min_length=10)
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def amount_is_number(cls, value: object) -> object:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("amount must be a positive float")
+        return float(value)
 
 
 class Refund(BaseModel):

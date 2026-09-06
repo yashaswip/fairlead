@@ -9,6 +9,9 @@ SSN = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 CC_CANDIDATE = re.compile(r"\b(?:\d[ \-]*?){13,19}\b")
 
 HOLD = 48
+_DIGIT_TAIL = re.compile(r"(?:\d[\d \-]{0,22})$")
+_EMAIL_INCOMPLETE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]*$")
+_LOCAL_DOT = re.compile(r"[A-Za-z0-9._%+\-]+\.[A-Za-z0-9._%+\-]+$")
 
 
 def luhn_ok(digits: str) -> bool:
@@ -38,16 +41,40 @@ def redact_complete(text: str) -> str:
     return CC_CANDIDATE.sub(_cc, out)
 
 
+def _hold_tail(text: str) -> tuple[str, str]:
+    """Hold only a suffix that could still become email / SSN / PAN — emit the rest now (TTFT)."""
+    candidates: list[str] = []
+    digit = _DIGIT_TAIL.search(text)
+    if digit:
+        raw = digit.group(0)
+        digits = re.sub(r"\D", "", raw)
+        if "-" in raw or len(digits) >= 3:
+            candidates.append(raw)
+    if "@" in text[-HOLD:]:
+        found = _EMAIL_INCOMPLETE.search(text)
+        if found:
+            candidates.append(found.group(0))
+    else:
+        found = _LOCAL_DOT.search(text)
+        if found:
+            candidates.append(found.group(0))
+    if not candidates:
+        return text, ""
+    tail = max(candidates, key=len)
+    if len(tail) > HOLD:
+        tail = tail[-HOLD:]
+    if not text.endswith(tail):
+        return text, ""
+    return text[: -len(tail)], tail
+
+
 class StreamRedactor:
     def __init__(self) -> None:
         self._tail = ""
 
     def push(self, chunk: str) -> str:
         joined = redact_complete(self._tail + chunk)
-        if len(joined) <= HOLD:
-            self._tail = joined
-            return ""
-        emit, self._tail = joined[:-HOLD], joined[-HOLD:]
+        emit, self._tail = _hold_tail(joined)
         return emit
 
     def flush(self) -> str:
@@ -73,7 +100,8 @@ def rewrite_sse_block(block: str, redactor: StreamRedactor, ending: bool) -> str
         except json.JSONDecodeError:
             lines_out.append(line)
             continue
-        content = (((parsed.get("choices") or [{}])[0].get("delta") or {}).get("content"))
+        delta = ((parsed.get("choices") or [{}])[0].get("delta") or {})
+        content = delta.get("content")
         if isinstance(content, str) and content:
             safe = redactor.push(content)
             if ending:

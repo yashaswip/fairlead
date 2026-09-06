@@ -53,11 +53,10 @@ python -m mcp_lab.task2.downstream   # :8091
 python -m mcp_lab.task2.proxy        # :8080
 ```
 
-`Authorization: Bearer <jwt>` — HS256 token with `{"role": "admin"|"viewer"}` (`GATEWAY_JWT_SECRET`).
+`Authorization: Bearer <token>` — role is `admin` or `viewer` (plain `Bearer admin` / `Bearer viewer`, or an HS256 JWT with `{"role": ...}`).
 
-- `tools/list` is forwarded
-- `tools/call` with `params.name` starting `admin_` needs `role=admin`
-- otherwise `{ "error": { "code": -32001, "message": "Unauthorized Tool Call" } }` and the downstream is not called
+- If method is `tools/list`, forward to the downstream MCP server
+- If method is `tools/call` and `params.name` starts with `admin_`, role must be admin; otherwise return JSON-RPC `-32001 Unauthorized Tool Call` and do not call downstream
 
 ```bash
 python -c "from mcp_lab.task2.policy import mint_token; print(mint_token('viewer', 'dev-only-change-me-use-32bytes-min'))"
