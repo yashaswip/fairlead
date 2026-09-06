@@ -72,14 +72,6 @@ SQLite sliding window, 50k tokens / tenant / minute. Primary has a 3s deadline; 
 python -m mcp_lab.task4.server
 ```
 
-## Task 5 — ZTNA path check
-
-```bash
-python -m mcp_lab.task5.diagnose
-```
-
-DNS + TCP to `DOWNSTREAM_MCP_URL`, optional mTLS files, proxy env. `ZTNA_STRICT=1` fails the run if cert/key are missing.
-
 ## Layout
 
 ```
@@ -87,6 +79,5 @@ src/mcp_lab/task1  MCP server
 src/mcp_lab/task2  JSON-RPC proxy + mock downstream
 src/mcp_lab/task3  SSE PII filter
 src/mcp_lab/task4  token window + model failover
-src/mcp_lab/task5  connectivity probe
 tests/
 ```

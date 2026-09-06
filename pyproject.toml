@@ -25,7 +25,6 @@ task2-downstream = "mcp_lab.task2.downstream:main"
 task2 = "mcp_lab.task2.proxy:main"
 task3 = "mcp_lab.task3.server:main"
 task4 = "mcp_lab.task4.server:main"
-task5 = "mcp_lab.task5.diagnose:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mcp_lab"]
