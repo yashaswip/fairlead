@@ -40,7 +40,7 @@ Cursor / Claude Desktop:
 {
   "command": "python",
   "args": ["-m", "mcp_lab.task1.server"],
-  "cwd": "/absolute/path/to/mcp-gateway-lab"
+  "cwd": "/absolute/path/to/fairlead"
 }
 ```
 

@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mcp-gateway-lab"
+name = "fairlead"
 version = "1.0.0"
-description = "Overview of MCP & LLM gateway assessment tasks"
+description = "fairlead — MCP & LLM gateway assessment"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
