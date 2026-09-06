@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "fairlead"
 version = "1.0.0"
-description = "fairlead — MCP & LLM gateway assessment"
+description = "MCP / LLM gateway take-home"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

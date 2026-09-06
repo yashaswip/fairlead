@@ -1,8 +1,6 @@
 # fairlead
 
-Python take-home for the FDE assessment: MCP servers, MCP gateways, LLM gateways, and stream guardrails.
-
-Python 3.11+, official `mcp` 2.x, Pydantic v2, FastAPI, httpx, SQLite on disk.
+FDE take-home (MCP + LLM gateways). Python 3.11.
 
 ```bash
 python3 -m venv .venv
@@ -11,46 +9,37 @@ pip install -e ".[dev]"
 pytest
 ```
 
-**25 tests.** Copy `.env.example` if you need non-default ports.
+I used the official `mcp` SDK, Pydantic, FastAPI, httpx, and SQLite on disk. Ports / URLs are in `.env.example`.
 
-## Task 1: Build a Custom MCP Server with Strict Validation & Transport Handling
+## Task 1
 
-`src/mcp_lab/task1/server.py` — official SDK, **stdio**.
+stdio MCP server: `python -m mcp_lab.task1.server`
 
-| Tool | Input |
-|------|--------|
-| `get_customer_record` | `customer_id` = `CUST-XXXXX` (`CUST-` + 5 digits) |
-| `trigger_refund` | same id, `amount` > 0, `reason` min length 10 |
+- `get_customer_record` — `customer_id` like `CUST-10428` (CUST- + 5 digits)
+- `trigger_refund` — same id, amount > 0, reason at least 10 chars
 
-Pydantic (`extra="forbid"`). Bad input → `MCPError(INVALID_PARAMS)` → JSON-RPC **`-32602`**. Logs go to **stderr** only; stdout is the MCP wire. No `print()`.
+Invalid args raise `MCPError` / `-32602`. Don't `print()` in this process; stdout is the JSON-RPC stream, logs go to stderr.
 
-```bash
-python -m mcp_lab.task1.server
-```
-
-Seed records: `CUST-10428`, `CUST-22019`.
+Try `CUST-10428` or `CUST-22019`.
 
 ```json
 {
   "command": "python",
   "args": ["-m", "mcp_lab.task1.server"],
-  "cwd": "/absolute/path/to/fairlead"
+  "cwd": "/absolute/path/to/this/repo"
 }
 ```
 
-## Task 2: Implement an MCP Security Gateway Proxy (Tool Filtering & Auth)
-
-HTTP JSON-RPC reverse proxy between an agent and a mock MCP server.
+## Task 2
 
 ```bash
-python -m mcp_lab.task2.downstream   # :8091
-python -m mcp_lab.task2.proxy        # :8080
+python -m mcp_lab.task2.downstream   # mock MCP on :8091
+python -m mcp_lab.task2.proxy        # gateway on :8080
 ```
 
-`Authorization: Bearer <token>` — role is `admin` or `viewer` (`Bearer admin` / `Bearer viewer`, or HS256 JWT `{"role": ...}`).
+Send `Authorization: Bearer admin` or `Bearer viewer` (JWT with a `role` claim also works).
 
-- `tools/list` — forward as-is
-- `tools/call` — if `params.name` starts with `admin_`, role must be admin; otherwise JSON-RPC **`-32001 Unauthorized Tool Call`** and the downstream is **not** called
+`tools/list` is proxied through. `tools/call` with a name starting `admin_` is admin-only; viewers get `-32001` and the mock never sees the call.
 
 ```bash
 curl -s localhost:8080/mcp \
@@ -59,9 +48,9 @@ curl -s localhost:8080/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"admin_reset_key"}}'
 ```
 
-## Task 3: Implement an LLM Gateway Streaming Guardrail (PII Redaction)
+## Task 3
 
-Proxies `/v1/chat/completions`, rewrites SSE **deltas** as they arrive. Emails, SSNs, and Luhn-valid cards become `[REDACTED]`. Only an incomplete suffix is held (not the full reply).
+Streaming proxy. It redacts emails / SSNs / Luhn cards to `[REDACTED]` as chunks come in. I keep a short tail so a split email still gets caught; I don't buffer the whole completion.
 
 ```bash
 python -m mcp_lab.mocks.llm --mode leak --port 8092
@@ -71,27 +60,23 @@ curl -N localhost:8081/v1/chat/completions \
   -d '{"messages":[{"role":"user","content":"hi"}],"stream":true}'
 ```
 
-Or set `UPSTREAM_LLM_URL` to a real OpenAI-style SSE endpoint.
+Point `UPSTREAM_LLM_URL` at a real `/v1/chat/completions` if you have one.
 
-## Task 4: Build a Rate-Limiting & Model Fallback Router for LLM Gateways
+## Task 4
 
-On-disk SQLite sliding window: **50,000 tokens/minute per tenant API key** (`Authorization: Bearer <key>`).
-
-If the primary returns **429** or exceeds **3000ms**, the request fails over to the backup. Client errors are `{ "error": { "code", "message", "request_id" } }` — no upstream bodies or stack traces.
+50k tokens/min per tenant key, stored in `./data/gateway.sqlite`. Primary has a 3s timeout; 429 or timeout goes to the backup URL. Errors look like `{error:{code,message,request_id}}` — I don't pass through upstream bodies.
 
 ```bash
 python -m mcp_lab.task4.server
 ```
 
-`SQLITE_PATH` default: `./data/gateway.sqlite`.
-
 ## Layout
 
 ```
-src/mcp_lab/task1   MCP server (stdio)
-src/mcp_lab/task2   JSON-RPC gateway + mock downstream
-src/mcp_lab/task3   streaming PII filter
-src/mcp_lab/task4   token window + failover
-src/mcp_lab/mocks   leaky/429/slow LLM stub
-tests/              25 tests
+src/mcp_lab/task1
+src/mcp_lab/task2
+src/mcp_lab/task3
+src/mcp_lab/task4
+src/mcp_lab/mocks   # fake LLM that leaks PII / 429s / hangs
+tests/
 ```
