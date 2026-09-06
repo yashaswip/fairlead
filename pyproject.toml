@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mcp-gateway-lab"
+version = "1.0.0"
+description = "FDE take-home: MCP server, MCP gateway, streaming PII filter, model router"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "mcp>=1.18.0",
+  "pydantic>=2.11.0",
+  "fastapi>=0.116.0",
+  "uvicorn[standard]>=0.35.0",
+  "httpx>=0.28.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.4.0", "pytest-asyncio>=1.1.0"]
+
+[project.scripts]
+task1 = "mcp_lab.task1.server:main"
+task2-downstream = "mcp_lab.task2.downstream:main"
+task2 = "mcp_lab.task2.proxy:main"
+task3 = "mcp_lab.task3.server:main"
+task4 = "mcp_lab.task4.server:main"
+task5 = "mcp_lab.task5.diagnose:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mcp_lab"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/mcp_lab" = "mcp_lab"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+pythonpath = ["src"]
