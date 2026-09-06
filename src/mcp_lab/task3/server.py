@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from mcp_lab import configure_logging, env, env_int
-from mcp_lab.task3.redact import StreamRedactor, rewrite_sse_block
+from mcp_lab.task3.redact import StreamRedactor, redact_complete, rewrite_sse_block
 
 log = configure_logging("llm-gw")
 
@@ -48,7 +48,14 @@ def create_app(*, upstream: str, upstream_key: str = "", http: httpx.AsyncClient
             if owns:
                 await upstream.aclose()
                 await client.aclose()
-            return JSONResponse(json.loads(payload), status_code=upstream.status_code)
+            try:
+                parsed = json.loads(payload)
+            except json.JSONDecodeError:
+                return JSONResponse({"error": {"message": "upstream unreachable"}}, status_code=502)
+            msg = (((parsed.get("choices") or [{}])[0].get("message") or {}).get("content"))
+            if isinstance(msg, str):
+                parsed["choices"][0]["message"]["content"] = redact_complete(msg)
+            return JSONResponse(parsed, status_code=upstream.status_code)
 
         async def frames():
             redactor = StreamRedactor()
@@ -56,6 +63,8 @@ def create_app(*, upstream: str, upstream_key: str = "", http: httpx.AsyncClient
             try:
                 async for raw in upstream.aiter_text():
                     carry += raw
+                    if len(carry) > 8192:
+                        carry = carry[-4096:]
                     parts = carry.split("\n\n")
                     carry = parts.pop() if parts else ""
                     for part in parts:

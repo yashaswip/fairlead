@@ -96,7 +96,11 @@ async def _call(app: FastAPI, url: str, body: dict) -> Attempt:
     if owns:
         client = httpx.AsyncClient(timeout=timeout)
     try:
-        res = await asyncio.wait_for(client.post(url, json=body, timeout=timeout), timeout=timeout_s)
+        try:
+            async with asyncio.timeout(timeout_s):
+                res = await client.post(url, json=body, timeout=timeout)
+        except (TimeoutError, httpx.TimeoutException):
+            return Attempt(ok=False, timed_out=True)
         if res.status_code == 429:
             return Attempt(ok=False, status=429)
         if res.is_error:
@@ -106,8 +110,6 @@ async def _call(app: FastAPI, url: str, body: dict) -> Attempt:
         except ValueError:
             return Attempt(ok=False, status=res.status_code or 502)
         return Attempt(ok=True, payload=payload, status=res.status_code)
-    except (asyncio.TimeoutError, httpx.TimeoutException):
-        return Attempt(ok=False, timed_out=True)
     except httpx.HTTPError as exc:
         log.info("upstream error: %s", type(exc).__name__)
         return Attempt(ok=False, status=0)

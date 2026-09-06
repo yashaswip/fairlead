@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+from typing import Annotated
 
 from mcp import MCPError
 from mcp.server import MCPServer
 from mcp.types import INVALID_PARAMS
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 from mcp_lab import configure_logging
 from mcp_lab.task1.ledger import (
@@ -29,8 +30,10 @@ def _parse(model, payload: dict):
 
 
 @mcp.tool(name="get_customer_record")
-def get_customer_record(customer_id: str) -> str:
-    """Look up a billing record. customer_id must match CUST-XXXXX."""
+def get_customer_record(
+    customer_id: Annotated[str, Field(description="Format CUST-XXXXX (five digits)")],
+) -> str:
+    """Look up a billing record."""
     args = _parse(GetCustomerInput, {"customer_id": customer_id})
     record = get_customer(args.customer_id)
     if record is None:
@@ -39,8 +42,12 @@ def get_customer_record(customer_id: str) -> str:
 
 
 @mcp.tool(name="trigger_refund")
-def trigger_refund(customer_id: str, amount: float, reason: str) -> str:
-    """Issue a refund. amount > 0, reason at least 10 characters."""
+def trigger_refund(
+    customer_id: Annotated[str, Field(description="Format CUST-XXXXX (five digits)")],
+    amount: Annotated[float, Field(gt=0, description="Positive USD amount")],
+    reason: Annotated[str, Field(min_length=10, description="Why the refund is issued")],
+) -> str:
+    """Issue a refund."""
     args = _parse(
         TriggerRefundInput,
         {"customer_id": customer_id, "amount": amount, "reason": reason},
@@ -55,7 +62,7 @@ def trigger_refund(customer_id: str, amount: float, reason: str) -> str:
 
 def main() -> None:
     log.info("stdio transport; logs on stderr only")
-    mcp.run()
+    mcp.run(transport="stdio")
 
 
 if __name__ == "__main__":
