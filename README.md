@@ -1,6 +1,6 @@
-# MCP Gateway Lab
+# Forward Deployed Engineer (FDE) Assessment Tasks
 
-Python take-home for MCP + LLM gateway work. Python 3.11+, official `mcp` SDK, Pydantic, FastAPI, SQLite on disk.
+MCP servers, MCP gateways, LLM gateways, security guardrails, and system integration. Python 3.11+, official `mcp` SDK, Pydantic, FastAPI, SQLite on disk.
 
 ```bash
 python3 -m venv .venv
@@ -9,7 +9,7 @@ pip install -e ".[dev]"
 pytest
 ```
 
-## Task 1 — customer MCP (stdio)
+## Task 1: Build a Custom MCP Server with Strict Validation & Transport Handling
 
 `src/mcp_lab/task1/server.py`
 
@@ -34,7 +34,7 @@ Cursor / Claude Desktop:
 
 Seed ids: `CUST-10428`, `CUST-22019`.
 
-## Task 2 — MCP gateway
+## Task 2: Implement an MCP Security Gateway Proxy (Tool Filtering & Auth)
 
 ```bash
 python -m mcp_lab.task2.downstream   # :8091
@@ -54,7 +54,7 @@ curl -s localhost:8080/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"admin_reset_key"}}'
 ```
 
-## Task 3 — streaming redaction
+## Task 3: Implement an LLM Gateway Streaming Guardrail (PII Redaction)
 
 SSE proxy. Chunks are rewritten as they arrive. A 48-char holdback covers emails / SSNs / PANs split across reads. Cards need a passing Luhn check.
 
@@ -64,7 +64,7 @@ python -m mcp_lab.task3.server
 
 Point `UPSTREAM_LLM_URL` at a `/v1/chat/completions` SSE source.
 
-## Task 4 — rate limit + failover
+## Task 4: Build a Rate-Limiting & Model Fallback Router for LLM Gateways
 
 SQLite sliding window, 50k tokens / tenant / minute. Primary has a 3s deadline; `429` or timeout flips to the backup URL. Clients only see `{ error: { code, message, request_id } }`.
 
